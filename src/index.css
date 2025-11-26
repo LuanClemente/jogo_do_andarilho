@@ -1,0 +1,31 @@
+@import url('https://fonts.googleapis.com/css2?family=Uncial+Antiqua&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-rpg-bg text-rpg-text font-sans;
+  /* Scrollbar escura para combinar */
+  scrollbar-color: #3b3b3b #0f1724; 
+  scrollbar-width: thin;
+}
+
+/* Classe utilitária para os botões estilo D&D do seu exemplo */
+.btn-dd {
+  @apply bg-[#2d2518] text-rpg-gold border border-rpg-accent px-4 py-2 rounded shadow-md 
+  font-medieval tracking-wide transition-all duration-200 uppercase text-sm
+  hover:bg-[#3c321f] hover:scale-105 hover:shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+/* Scrollbar customizada para Webkit (Chrome) */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0f1724; 
+}
+::-webkit-scrollbar-thumb {
+  background: #3b3b3b; 
+  border-radius: 4px;
+}
