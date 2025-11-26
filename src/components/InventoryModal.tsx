@@ -7,7 +7,7 @@ interface InventoryModalProps {
 
 export default function InventoryModal({ player, onClose }: InventoryModalProps) {
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in p-4">
             <div className="bg-[#1a1510] border-2 border-[#8b7355] p-6 rounded-lg max-w-md w-full shadow-2xl relative">
                 
                 {/* Botão Fechar */}
@@ -18,36 +18,48 @@ export default function InventoryModal({ player, onClose }: InventoryModalProps)
                     ✕
                 </button>
 
-                <h2 className="text-2xl font-medieval text-[#e8d9a8] text-center mb-6 border-b border-[#8b7355]/30 pb-2">
-                    🎒 Mochila do Viajante
+                <h2 className="text-2xl font-medieval text-[#e8d9a8] text-center mb-6 border-b border-[#8b7355]/30 pb-2 flex items-center justify-center gap-2">
+                    <span>🎒</span> Mochila do Viajante
                 </h2>
 
-                <div className="mb-4 flex items-center justify-center gap-2 bg-[#0f0e0d] p-3 rounded border border-[#8b7355]/20">
-                    <span className="text-2xl">💰</span>
-                    <span className="text-xl font-mono text-yellow-500 font-bold">{player.gold} Ouro</span>
-                </div>
+                {/* --- REMOVEMOS A ÁREA DE OURO DAQUI --- */}
 
-                <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                {/* Lista de Itens */}
+                <div className="space-y-2 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
                     {player.inventory.length === 0 ? (
-                        <p className="text-gray-500 text-center italic py-8">
-                            A mochila está vazia, apenas poeira e esperança...
-                        </p>
+                        <div className="text-center py-8 opacity-70">
+                            <p className="text-rpg-gold font-medieval mb-2">A mochila está vazia.</p>
+                            <p className="text-xs text-gray-500 font-mono italic">Apenas poeira e sonhos de riqueza...</p>
+                        </div>
                     ) : (
                         player.inventory.map((item, idx) => (
-                            <div key={idx} className="flex justify-between items-center bg-[#25201b] p-3 rounded border border-white/5 hover:border-[#8b7355]/50 transition-colors">
-                                <span className={`font-medieval tracking-wide ${
-                                    item.type === 'weapon' ? 'text-red-300' :
-                                    item.type === 'potion' ? 'text-blue-300' :
-                                    item.type === 'material' ? 'text-gray-400' : 'text-white'
-                                }`}>
-                                    {item.name}
-                                </span>
-                                <span className="text-xs text-[#8b7355] font-mono">
-                                    Val: {item.value}
+                            <div key={idx} className="flex justify-between items-center bg-[#25201b] p-3 rounded border border-white/5 hover:border-[#8b7355]/50 transition-colors animate-fade-in">
+                                <div className="flex items-center gap-3">
+                                    {/* Ícone simples baseado no tipo */}
+                                    <span className="text-xl opacity-80">
+                                        {item.type === 'weapon' && '⚔️'}
+                                        {item.type === 'armor' && '🛡️'}
+                                        {item.type === 'potion' && '🧪'}
+                                        {item.type === 'material' && '📦'}
+                                    </span>
+                                    <span className={`font-medieval tracking-wide ${
+                                        item.type === 'weapon' ? 'text-red-300' :
+                                        item.type === 'armor' ? 'text-blue-300' :
+                                        item.type === 'potion' ? 'text-green-300' : 'text-gray-300'
+                                    }`}>
+                                        {item.name}
+                                    </span>
+                                </div>
+                                <span className="text-xs text-[#8b7355] font-mono bg-black/30 px-2 py-1 rounded">
+                                    {item.value} $
                                 </span>
                             </div>
                         ))
                     )}
+                </div>
+                {/* Footer do Modal */}
+                <div className="mt-6 text-center border-t border-[#8b7355]/20 pt-4">
+                    <p className="text-xs text-gray-500 font-mono">Capacidade: {player.inventory.length} itens</p>
                 </div>
             </div>
         </div>

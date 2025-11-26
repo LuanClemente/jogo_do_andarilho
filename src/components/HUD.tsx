@@ -5,12 +5,11 @@ interface HUDProps {
     onExplore: () => void;
     onRest: () => void;
     onVillage: () => void;
+    onOpenInventory: () => void; // Nova função recebida
 }
 
-export default function HUD({ player, onExplore, onRest, onVillage }: HUDProps) {
-    // Simulação da lógica de próximo nível baseada no seu Python (exponencial simples ou fixo)
-    // No seu python: XP_LEVELS = [0, 30, 80, 160...]
-    const nextLevelXp = player.level * 100; // Simplificado para visualização
+export default function HUD({ player, onExplore, onRest, onVillage, onOpenInventory }: HUDProps) {
+    const nextLevelXp = player.level * 100;
     const xpPercentage = Math.min(100, (player.xp / nextLevelXp) * 100);
 
     return (
@@ -19,16 +18,15 @@ export default function HUD({ player, onExplore, onRest, onVillage }: HUDProps) 
                 Ficha
             </h3>
 
-           {/* Nome e Info Básica */}
+            {/* Nome e Título */}
             <div className="text-center mb-4">
                 <h2 className="text-xl font-bold text-white tracking-wide">{player.name}</h2>
-                {/* AQUI ESTÁ A MUDANÇA: Usamos player.title agora */}
                 <p className="text-xs text-rpg-accent uppercase mt-1 font-medieval tracking-widest">
                     Dia {player.day} • {player.title}
                 </p>
             </div>
 
-            {/* Barra de XP e Nível */}
+            {/* Barra de XP */}
             <div className="mb-6 relative group cursor-help">
                 <div className="flex justify-between text-xs text-rpg-gold mb-1 font-medieval">
                     <span>Nível {player.level}</span>
@@ -42,9 +40,8 @@ export default function HUD({ player, onExplore, onRest, onVillage }: HUDProps) 
                 </div>
             </div>
 
-            {/* Status Principais */}
+            {/* HP e Stamina */}
             <div className="space-y-4 mb-6 font-mono text-sm">
-                {/* HP */}
                 <div>
                     <div className="flex justify-between mb-1">
                         <span className="text-red-400 font-bold">HP</span>
@@ -55,7 +52,6 @@ export default function HUD({ player, onExplore, onRest, onVillage }: HUDProps) 
                     </div>
                 </div>
 
-                {/* Stamina */}
                 <div>
                     <div className="flex justify-between mb-1">
                         <span className="text-green-400 font-bold">STA</span>
@@ -68,7 +64,7 @@ export default function HUD({ player, onExplore, onRest, onVillage }: HUDProps) 
             </div>
 
             {/* Atributos */}
-            <div className="grid grid-cols-3 gap-2 text-center text-sm font-mono bg-[#0d1320] p-2 rounded border border-rpg-border mb-6">
+            <div className="grid grid-cols-3 gap-2 text-center text-sm font-mono bg-[#0d1320] p-2 rounded border border-rpg-border mb-4">
                 <div>
                     <div className="text-gray-500 text-[10px]">FOR</div>
                     <div className="text-white">{player.str}</div>
@@ -81,6 +77,20 @@ export default function HUD({ player, onExplore, onRest, onVillage }: HUDProps) 
                     <div className="text-gray-500 text-[10px]">VIT</div>
                     <div className="text-white">{player.vit}</div>
                 </div>
+            </div>
+
+            {/* --- NOVA ÁREA DE OURO E MOCHILA --- */}
+            <div className="mb-6">
+                {/* Display de Ouro Permanente */}
+                <div className="flex justify-center items-center gap-2 mb-3 bg-[#0d1320] p-2 rounded border border-rpg-border/50">
+                    <span className="text-2xl">💰</span>
+                    <span className="text-rpg-gold font-mono text-lg">{player.gold} Ouro</span>
+                </div>
+
+                {/* Botão para abrir a Mochila */}
+                <button onClick={onOpenInventory} className="btn-dd w-full flex justify-center items-center gap-2">
+                    <span>🎒 Abrir Mochila</span>
+                </button>
             </div>
 
             {/* Ações de Mundo */}

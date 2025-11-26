@@ -8,8 +8,8 @@ import LoginScreen from './components/LoginScreen'
 import GameModeSelect from './components/GameModeSelect'
 import PixQRCode from './components/PixQRCode'
 import DeathModal from './components/DeathModal'
-import InventoryModal from './components/InventoryModal' // Novo
-import DiceRoller from './components/DiceRoller' // Novo
+import InventoryModal from './components/InventoryModal'
+import DiceRoller from './components/DiceRoller'
 
 // --- LOOT TABLE ---
 const ITEMS_DB: Item[] = [
@@ -17,7 +17,7 @@ const ITEMS_DB: Item[] = [
     { id: 'wolf_pelt', name: 'Pele de Lobo', type: 'material', value: 5 },
     { id: 'rusty_knife', name: 'Faca Enferrujada', type: 'weapon', value: 10 },
     { id: 'iron_sword', name: 'Espada de Ferro', type: 'weapon', value: 25 },
-    { id: 'leather_scrap', name: 'Retalho de Couro', type: 'material', value: 3 },
+    { id: 'leather_chest', name: 'Peitoral de Couro', type: 'armor', value: 20 },
     { id: 'small_potion', name: 'Poção Pequena', type: 'potion', value: 15 },
     { id: 'gold_coin', name: 'Moeda Antiga', type: 'material', value: 50 },
 ];
@@ -31,14 +31,8 @@ export default function App() {
   const [combat, setCombat] = useState<{ enemy: Enemy | null, stage?: string } | null>(null)
   const [deathInfo, setDeathInfo] = useState<{ enemyName: string } | null>(null);
   
-  // --- NOVOS ESTADOS ---
   const [showInventory, setShowInventory] = useState(false);
-  
-  // Estado para controlar o Rolador de Dados
-  // Se não for null, mostra o dado na tela. "type" define o que acontece depois.
   const [pendingRoll, setPendingRoll] = useState<{ type: 'attack' | 'flee', reason: string } | null>(null);
-
-  // Estado para a mensagem de "Covarde" do Boss
   const [bossTaunt, setBossTaunt] = useState<string | null>(null);
 
   // --- LÓGICA DE HOTKEYS ---
@@ -49,7 +43,7 @@ export default function App() {
       if (e.key === '1') explore()
       if (e.key === '2') rest()
       if (e.key === '3') openVillage()
-      if (e.key === '4') handleAttackClick() // Chama o preparador do dado
+      if (e.key === '4') handleAttackClick()
       if (e.key === '5') playerCharge()
       if (e.key === 'i' || e.key === 'I') setShowInventory(prev => !prev)
     }
@@ -133,18 +127,16 @@ export default function App() {
     if (!player) return;
     if (combat?.enemy) { addLog("⚠️ Você já está em combate!"); return; }
     
-    // Lista de Inimigos
     const enemies: Enemy[] = [
       { id: 'rato', name: 'Rato Voraz', hp: 6, str: 1, agi: 1, dmg_die: 4, isBoss: false },
       { id: 'lobo', name: 'Lobo Magro', hp: 10, str: 2, agi: 2, dmg_die: 6, isBoss: false },
       { id: 'bandido', name: 'Bandido', hp: 12, str: 2, agi: 1, dmg_die: 6, isBoss: false },
-      // Boss Raro (só p/ teste, chance baixa)
+      // Boss (10% chance)
       { id: 'ogro', name: 'Ogro da Caverna', hp: 25, str: 4, agi: 1, dmg_die: 8, isBoss: true }
     ]
     
-    // Chance pequena de vir boss (ou a cada X dias)
     let enemy = { ...enemies[Math.floor(Math.random() * (enemies.length - 1))] };
-    if (Math.random() < 0.1) enemy = { ...enemies[3] }; // 10% de chance de Ogro
+    if (Math.random() < 0.1) enemy = { ...enemies[3] };
 
     setCombat({ enemy, stage: 'init' })
     const label = enemy.isBoss ? `<strong class='text-yellow-500 uppercase'>BOSS: ${enemy.name}</strong>` : `<strong class='text-red-400'>${enemy.name}</strong>`;
@@ -161,58 +153,45 @@ export default function App() {
     addLog(`💤 Descansou. <span class='text-green-400'>+${heal} HP</span>, <span class='text-green-400'>+${stam} STA</span>.`);
   }
 
-  async function openVillage() { setShowInventory(true); } // Atalho provisório: Vila abre Inventário por enquanto ou addLog
+  async function openVillage() { 
+      if(!player) return;
+      addLog(`🏠 Vila em construção... (Ouro: ${player.gold})`) 
+  }
 
   // === SISTEMA DE COMBATE ===
-
-  // 1. INICIAR ATAQUE (Abre Dado)
   function handleAttackClick() {
       if (!player || !combat || !combat.enemy) return;
       setPendingRoll({ type: 'attack', reason: 'Atacar' });
   }
 
-  // 2. INICIAR FUGA (Checa Boss ou Abre Dado)
   function handleFleeClick() {
       if (!player || !combat || !combat.enemy) return;
-      
-      // CHECAGEM DE BOSS
       if (combat.enemy.isBoss) {
           setBossTaunt("Você tentou fugir como o belo covarde que é, mas contra um chefe... Você só escolheu sofrer mais ao clicar nesse botão!");
-          // Penalidade: Perde o turno (Boss ataca) depois de 6 seg
           setTimeout(() => {
               setBossTaunt(null);
               addLog("<span class='text-yellow-600'>Sua covardia custou caro. O Chefe aproveita sua hesitação!</span>");
-              enemyTurn(); // Inimigo ataca de graça
+              enemyTurn();
           }, 6000);
           return;
       }
-
       setPendingRoll({ type: 'flee', reason: 'Fuga' });
   }
 
-  // 3. CALLBACK DO DADO (Recebe o resultado e executa a ação)
   function handleDiceRoll(result: number) {
       const actionType = pendingRoll?.type;
-      setPendingRoll(null); // Fecha o dado
-
-      if (actionType === 'attack') {
-          resolveAttack(result);
-      } else if (actionType === 'flee') {
-          resolveFlee(result);
-      }
+      setPendingRoll(null);
+      if (actionType === 'attack') resolveAttack(result);
+      else if (actionType === 'flee') resolveFlee(result);
   }
 
-  // Lógica Real do Ataque
   function resolveAttack(roll: number) {
       if (!player || !combat || !combat.enemy) return;
-      
       const isCharged = player.charged;
       let damageMult = isCharged ? 1.5 : 1;
-      
       const rollMult = getD20Mult(roll);
       const base = Math.floor(Math.random() * 4) + 1 + player.str;
       const damage = Math.max(0, Math.floor((base * rollMult) * damageMult));
-      
       combat.enemy.hp -= damage;
       
       let logMsg = `<span class='text-blue-300'>${player.name}</span> atacou (d20: <strong>${roll}</strong>). Dano: <strong class='text-white'>${damage}</strong>.`;
@@ -232,7 +211,6 @@ export default function App() {
       setTimeout(() => enemyTurn(), 600);
   }
 
-  // Lógica Real da Fuga
   function resolveFlee(roll: number) {
       if (roll > 10) {
           addLog(`<span class="text-green-400">💨 Sucesso! (d20: ${roll}) Você fugiu para viver mais um dia.</span>`);
@@ -243,24 +221,17 @@ export default function App() {
       }
   }
 
-  // CARREGAR (Modificado: Perde turno mas ganha Defesa + Carga)
   function playerCharge() {
     if (!player || !combat || !combat.enemy) return;
     if (player.stamina < 2) { addLog('😓 Sem stamina (Custo: 2).'); return; }
-    
-    // Ativa Charged E Defending
     setPlayer(p => p ? ({ ...p, stamina: p.stamina - 2, charged: true, defending: true }) : null);
     addLog(`🔥 ${player.name} assume postura firme! (Defesa Alta + Próx. Ataque Forte)`);
-    
-    // Passa o turno direto pro inimigo
     setTimeout(() => enemyTurn(), 800);
   }
 
   function enemyTurn() {
     if (!combat || !combat.enemy) return;
     const e = combat.enemy;
-    
-    // Rola ataque do inimigo
     const roll = Math.floor(Math.random() * 20) + 1;
     const mult = getD20Mult(roll);
     const base = Math.floor(Math.random() * e.dmg_die) + 1 + e.str;
@@ -268,24 +239,17 @@ export default function App() {
     
     setPlayer(p => {
       if (!p) return null;
-      
-      // Verifica se está defendendo (usou Carregar)
       let receivedDmg = damage;
       let defendedMsg = "";
-      
       if (p.defending) {
-          receivedDmg = Math.floor(damage / 2); // Reduz dano pela metade
+          receivedDmg = Math.floor(damage / 2);
           defendedMsg = " (Bloqueado!)";
       }
-
       addLog(`👾 <strong>${e.name}</strong> atacou. Dano: <strong class='text-red-500'>${receivedDmg}</strong>${defendedMsg}.`);
-      
       if (p.hp - receivedDmg <= 0) {
         addLog('💀 <strong>VOCÊ MORREU...</strong>');
-        setDeathInfo({ enemyName: e.name }); // Chama Modal Morte
+        setDeathInfo({ enemyName: e.name });
       }
-      
-      // Remove o status de defesa (dura só 1 turno) mas MANTÉM o charged
       return { ...p, hp: p.hp - receivedDmg, defending: false };
     });
   }
@@ -298,13 +262,12 @@ export default function App() {
       {showInventory && player && <InventoryModal player={player} onClose={() => setShowInventory(false)} />}
       {pendingRoll && <DiceRoller reason={pendingRoll.reason} onRoll={handleDiceRoll} />}
       
-      {/* MENSAGEM DO BOSS (COVARDE) */}
+      {/* MENSAGEM DO BOSS */}
       {bossTaunt && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 px-4">
               <div className="bg-red-950 border-4 border-red-600 p-8 rounded-xl max-w-2xl text-center shadow-[0_0_100px_rgba(220,38,38,0.6)] animate-bounce">
                   <h2 className="text-3xl font-medieval text-red-500 mb-4">A VOZ DO CHEFE ECOA...</h2>
                   <p className="text-xl text-white font-mono leading-relaxed">"{bossTaunt}"</p>
-                  <p className="text-sm text-gray-500 mt-6 animate-pulse">(Você está paralisado de medo...)</p>
               </div>
           </div>
       )}
@@ -324,19 +287,19 @@ export default function App() {
                 </h1>
                 <p className="text-rpg-accent font-medieval text-lg mt-1 opacity-80">— Da Lama ao Trono —</p>
                 
-                {/* Botão de Inventário no Header */}
-                <button 
-                    onClick={() => setShowInventory(true)}
-                    className="absolute right-0 top-2 text-2xl animate-pulse hover:scale-110 transition-transform"
-                    title="Abrir Inventário (I)"
-                >
-                    🎒
-                </button>
+                {/* REMOVEMOS O BOTÃO DE MOCHILA DAQUI */}
             </header>
             
             <main className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-[300px_1fr_300px] gap-6 items-start h-auto lg:h-[600px]">
                 <section className="h-full">
-                    <HUD player={player} onExplore={explore} onRest={rest} onVillage={openVillage} />
+                    {/* Passamos a função de abrir o inventário para o HUD */}
+                    <HUD 
+                        player={player} 
+                        onExplore={explore} 
+                        onRest={rest} 
+                        onVillage={openVillage}
+                        onOpenInventory={() => setShowInventory(true)}
+                    />
                 </section>
                 <section className="h-full">
                     <LogBox logs={logs} />
@@ -344,9 +307,9 @@ export default function App() {
                 <section className="h-full">
                     <CombatPanel 
                         enemy={combat?.enemy || null} 
-                        onAttack={handleAttackClick} // Agora chama o Dado
+                        onAttack={handleAttackClick}
                         onCharge={playerCharge} 
-                        onFlee={handleFleeClick} // Nova função de fuga
+                        onFlee={handleFleeClick}
                     />
                 </section>
             </main>
@@ -358,7 +321,8 @@ export default function App() {
                 <div className="text-center md:text-left">
                     <h4 className="text-rpg-gold font-medieval text-xl mb-2">Ó nobre viajante!</h4>
                     <p className="text-gray-400 text-xs md:text-sm font-mono leading-relaxed italic">
-                        "Se esta plataforma está te trazendo um pouco de alegria, saiba que ela é feita por uma só pessoa..."
+                        "Se esta plataforma está te trazendo um pouco de alegria, saiba que ela é feita por uma só pessoa, 
+                        que não passa de um simples plebeu..."
                     </p>
                 </div>
             </footer>
@@ -366,7 +330,7 @@ export default function App() {
       )}
 
       <div className="text-gray-700 text-[10px] text-center font-mono mt-4 pb-4">
-        v0.1.1 • React Frontend • Flask Backend • Criado por MrCap
+        v0.1.2 • React Frontend • Flask Backend • Criado por MrCap
       </div>
     </div>
   )
