@@ -21,7 +21,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         { name: "MadMax", title: "O Louco", days: 12 },
     ];
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setMsg(null);
         if (!username || !password) {
@@ -29,7 +29,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             return;
         }
         if (isRegistering) {
-            const res = registerUser(username, password);
+            const res = await registerUser(username, password);
             if (res.success) {
                 setMsg({ text: res.message, type: 'success' });
                 setIsRegistering(false); setPassword('');
@@ -37,7 +37,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 setMsg({ text: res.message, type: 'error' });
             }
         } else {
-            const res = loginUser(username, password);
+            const res = await loginUser(username, password);
             if (res.success) {
                 onLoginSuccess(username, res.hasSave);
             } else {

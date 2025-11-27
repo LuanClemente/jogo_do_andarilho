@@ -98,10 +98,10 @@ export default function App() {
     setGameState('selecting'); 
   }
 
-  const handleModeSelect = (mode: 'Moderado' | 'Difícil' | 'Continuar') => {
+  const handleModeSelect = async (mode: 'Moderado' | 'Difícil' | 'Continuar') => {
     // CONTINUAR JOGO SALVO
     if (mode === 'Continuar') {
-        const loaded = loadProgress(tempUsername);
+        const loaded = await loadProgress(tempUsername);
         if (loaded) {
             setPlayer(loaded);
             setGameState('playing');

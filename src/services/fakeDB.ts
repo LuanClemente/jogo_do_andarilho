@@ -1,53 +1,61 @@
-// Arquivo: src/services/fakeDB.ts
-import type { Player } from "../types"; // Uso de 'type' explícito
+import type { Player } from "../types";
 
-const DB_KEY = "sisifo_rpg_database_v1";
+// URL do Backend (Em produção no PythonAnywhere, será apenas "")
+// Em desenvolvimento local, apontamos para o Flask
+const API_URL = import.meta.env.PROD ? "" : "http://localhost:5000";
 
-interface UserData {
-    password: string;
-    saveData: Player | null;
-}
-
-interface Database {
-    [username: string]: UserData;
-}
-
-function getDB(): Database {
-    const json = localStorage.getItem(DB_KEY);
-    return json ? JSON.parse(json) : {};
-}
-
-function saveDB(db: Database) {
-    localStorage.setItem(DB_KEY, JSON.stringify(db));
-}
-
-export function registerUser(username: string, password: string) {
-    const db = getDB();
-    if (db[username]) return { success: false, message: "Nome já existe." };
-    
-    db[username] = { password, saveData: null };
-    saveDB(db);
-    return { success: true, message: "Conta criada!" };
-}
-
-export function loginUser(username: string, password: string) {
-    const db = getDB();
-    const user = db[username];
-    if (!user) return { success: false, message: "Usuário não existe.", hasSave: false };
-    if (user.password !== password) return { success: false, message: "Senha errada.", hasSave: false };
-    
-    return { success: true, message: "Logado.", hasSave: !!user.saveData };
-}
-
-export function saveProgress(username: string, player: Player) {
-    const db = getDB();
-    if (db[username]) {
-        db[username].saveData = player;
-        saveDB(db);
+export async function registerUser(username: string, password: string) {
+    try {
+        const res = await fetch(`${API_URL}/api/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        return await res.json();
+    } catch (e) {
+        return { success: false, message: "Erro de conexão com o servidor." };
     }
 }
 
-export function loadProgress(username: string): Player | null {
-    const db = getDB();
-    return db[username]?.saveData || null;
+export async function loginUser(username: string, password: string) {
+    try {
+        const res = await fetch(`${API_URL}/api/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        return await res.json();
+    } catch (e) {
+        return { success: false, message: "Servidor indisponível.", hasSave: false };
+    }
+}
+
+export async function saveProgress(username: string, player: Player) {
+    try {
+        await fetch(`${API_URL}/api/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, player_data: player })
+        });
+        console.log("Salvo na nuvem!");
+    } catch (e) {
+        console.error("Erro ao salvar na nuvem.");
+    }
+}
+
+export async function loadProgress(username: string): Promise<Player | null> {
+    try {
+        const res = await fetch(`${API_URL}/api/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username })
+        });
+        const data = await res.json();
+        if (data.success) {
+            return data.player;
+        }
+    } catch (e) {
+        console.error("Erro ao carregar.");
+    }
+    return null;
 }
