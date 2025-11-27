@@ -67,6 +67,9 @@ export interface Player {
     level: number;
     xp: number;
     
+    // Lista de nomes de skills aprendidas
+    learnedSkills: string[];
+    
     // Estados de Combate
     charged?: boolean;
     defending?: boolean;
