@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import type { Player, Enemy, Item } from './types'
 
+// Serviços e Componentes
+import { saveProgress, loadProgress } from './services/fakeDB' // AGORA USAMOS ISSO DE VERDADE
 import HUD from './components/HUD'
 import LogBox from './components/LogBox'
 import CombatPanel from './components/CombatPanel'
@@ -8,330 +10,371 @@ import LoginScreen from './components/LoginScreen'
 import GameModeSelect from './components/GameModeSelect'
 import PixQRCode from './components/PixQRCode'
 import DeathModal from './components/DeathModal'
-import InventoryModal from './components/InventoryModal'
-import DiceRoller from './components/DiceRoller'
+import CharacterModal from './components/CharacterModal'
+import SkillTreeModal from './components/SkillTreeModal'
+import MapModal from './components/MapModal'
+import Dice3D from './components/Dice3D'
 
-// --- LOOT TABLE ---
 const ITEMS_DB: Item[] = [
-    { id: 'rat_tooth', name: 'Dente de Rato', type: 'material', value: 2 },
+    { id: 'rusty_sword', name: 'Espada Enferrujada', type: 'weapon', value: 10, stats: { atk: 3, effect: 'bleed' } },
+    { id: 'iron_sword', name: 'Espada de Ferro', type: 'weapon', value: 50, stats: { atk: 6 } },
+    { id: 'leather_armor', name: 'Peitoral de Couro', type: 'armor', value: 30, stats: { def: 2 } },
+    { id: 'health_pot', name: 'Poção de Vida', type: 'potion', value: 15 },
     { id: 'wolf_pelt', name: 'Pele de Lobo', type: 'material', value: 5 },
-    { id: 'rusty_knife', name: 'Faca Enferrujada', type: 'weapon', value: 10 },
-    { id: 'iron_sword', name: 'Espada de Ferro', type: 'weapon', value: 25 },
-    { id: 'leather_chest', name: 'Peitoral de Couro', type: 'armor', value: 20 },
-    { id: 'small_potion', name: 'Poção Pequena', type: 'potion', value: 15 },
-    { id: 'gold_coin', name: 'Moeda Antiga', type: 'material', value: 50 },
+    { id: 'gold_coin', name: 'Saco de Ouro', type: 'material', value: 100 },
 ];
 
 export default function App() {
+  // --- ESTADOS DO JOGO ---
   const [gameState, setGameState] = useState<'login' | 'selecting' | 'playing'>('login')
-  const [tempUsername, setTempUsername] = useState('') 
+  const [tempUsername, setTempUsername] = useState('')
+  const [userHasSave, setUserHasSave] = useState(false)
   
   const [player, setPlayer] = useState<Player | null>(null)
   const [logs, setLogs] = useState<string[]>(['Sistema iniciado...'])
+  
   const [combat, setCombat] = useState<{ enemy: Enemy | null, stage?: string } | null>(null)
   const [deathInfo, setDeathInfo] = useState<{ enemyName: string } | null>(null);
   
+  // Modais
   const [showInventory, setShowInventory] = useState(false);
-  const [pendingRoll, setPendingRoll] = useState<{ type: 'attack' | 'flee', reason: string } | null>(null);
+  const [showSkills, setShowSkills] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+  
+  // Controle de Turno e Dados
+  const [rollingDice, setRollingDice] = useState<{ reason: string, type: 'attack' | 'flee' } | null>(null);
+  const [turnState, setTurnState] = useState<'player_input' | 'resolving' | 'enemy_turn'>('player_input');
   const [bossTaunt, setBossTaunt] = useState<string | null>(null);
+  
+  // REF DE SEGURANÇA PARA EVITAR ATAQUE DUPLO
+  const isProcessingTurn = useRef(false);
 
-  // --- LÓGICA DE HOTKEYS ---
+  // --- 1. AUTO-SAVE (Sempre que o player ou inventário mudar) ---
   useEffect(() => {
-    if (gameState !== 'playing' || deathInfo || pendingRoll || showInventory || bossTaunt) return;
+      if (player && tempUsername && gameState === 'playing') {
+          saveProgress(tempUsername, player);
+      }
+  }, [player, tempUsername, gameState]);
 
+  // --- 2. TRAVA DE TURNO (Anti Bug Duplo) ---
+  useEffect(() => {
+    if (turnState === 'enemy_turn' && combat && player && !deathInfo) {
+        const timer = setTimeout(() => {
+            enemyTurnLogic();
+        }, 1000);
+        return () => clearTimeout(timer);
+    }
+  }, [turnState, combat, deathInfo]);
+
+  // --- HOTKEYS ---
+  useEffect(() => {
+    if (gameState !== 'playing' || deathInfo || rollingDice || showInventory || showSkills || showMap) return;
     function onKey(e: KeyboardEvent) {
+      if (isProcessingTurn.current) return; 
       if (e.key === '1') explore()
       if (e.key === '2') rest()
       if (e.key === '3') openVillage()
       if (e.key === '4') handleAttackClick()
       if (e.key === '5') playerCharge()
       if (e.key === 'i' || e.key === 'I') setShowInventory(prev => !prev)
+      if (e.key === 'm' || e.key === 'M') setShowMap(prev => !prev)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [gameState, player, combat, deathInfo, pendingRoll, showInventory, bossTaunt])
+  }, [gameState, deathInfo, rollingDice, showInventory, showSkills, showMap, turnState])
 
-  function addLog(text: string) {
-    setLogs(s => [...s, text].slice(-200))
-  }
-
+  function addLog(text: string) { setLogs(s => [...s, text].slice(-200)) }
+  
   function getD20Mult(roll: number) {
-    if (roll === 1) return 0
-    if (roll <= 4) return 0
-    if (roll <= 9) return 0.5
-    if (roll <= 12) return 0.8
-    if (roll <= 18) return 1
-    if (roll === 19) return 1.5
-    if (roll === 20) return 3
-    return 1
+    if (roll === 1) return 0; if (roll <= 4) return 0; if (roll <= 9) return 0.5;
+    if (roll <= 12) return 0.8; if (roll <= 18) return 1; if (roll === 19) return 1.5; if (roll === 20) return 3;
+    return 1;
   }
 
-  // --- LOOT SYSTEM ---
-  function generateLoot(enemy: Enemy) {
-      if (!player) return;
-      const goldDrop = Math.floor(Math.random() * 5) + enemy.str + 1;
-      let itemDrop: Item | null = null;
-      if (Math.random() < 0.4) {
-          itemDrop = ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
-      }
-      setPlayer(prev => {
-          if (!prev) return null;
-          const newInv = itemDrop ? [...prev.inventory, itemDrop] : prev.inventory;
-          return { ...prev, gold: prev.gold + goldDrop, inventory: newInv };
-      });
-      let lootMsg = `💰 Loot: <span class="text-yellow-400 font-bold">${goldDrop} Ouro</span>`;
-      if (itemDrop) lootMsg += ` e <span class="text-purple-400 font-bold">[${itemDrop.name}]</span>`;
-      addLog(lootMsg + ".");
-  }
-
-  // --- STARTUP LOGIC ---
-  const handleLoginSubmit = (username: string, isNewAccount: boolean) => {
+  // --- LOGIN & LOAD SYSTEM ---
+  const handleLoginSuccess = (username: string, hasSave: boolean) => {
     setTempUsername(username);
+    setUserHasSave(hasSave); // Ativa o botão Continuar se tiver save
     setGameState('selecting'); 
   }
 
   const handleModeSelect = (mode: 'Moderado' | 'Difícil' | 'Continuar') => {
-    let finalDiff = mode;
+    // CONTINUAR JOGO SALVO
     if (mode === 'Continuar') {
-        finalDiff = 'Moderado'; 
-        addLog(`Bem-vindo de volta, <strong>${tempUsername}</strong>.`);
-    } else {
-        addLog(`Iniciando nova jornada: <strong class="${mode === 'Difícil' ? 'text-red-500' : 'text-yellow-500'}">${mode}</strong>.`);
+        const loaded = loadProgress(tempUsername);
+        if (loaded) {
+            setPlayer(loaded);
+            setGameState('playing');
+            addLog(`Bem-vindo de volta, <strong>${loaded.name}</strong>. O ciclo continua.`);
+            return;
+        } else {
+            addLog("Erro ao carregar save. Iniciando novo jogo.");
+        }
     }
 
+    // NOVO JOGO (Nível 0, Skill 0)
+    const finalDiff = mode;
+    addLog(`Nova jornada iniciada: <strong class="${mode === 'Difícil' ? 'text-red-500' : 'text-yellow-500'}">${mode}</strong>.`);
+
     const newPlayer: Player = {
-        name: tempUsername, title: 'Andarilho', hp: 15, max_hp: 15, stamina: 5, max_stamina: 5,
-        str: 1, agi: 1, vit: 1, day: 1, difficulty: finalDiff, encounters_today: 0, encounters_per_day: 3, 
-        xp: 0, level: 1, charged: false, gold: 0, inventory: [], defending: false
+        name: tempUsername, title: 'Andarilho', 
+        hp: 20, max_hp: 20, stamina: 10, max_stamina: 10, mana: 10, max_mana: 10,
+        str: 1, agi: 1, vit: 1, int: 1,
+        statPoints: 0, 
+        skillPoints: 0, // Começa com 0
+        level: 0,       // Começa Nível 0
+        xp: 0,
+        day: 1, difficulty: finalDiff, encounters_today: 0, encounters_per_day: 3, 
+        charged: false, defending: false, statusEffects: [],
+        gold: 0, inventory: [],
+        equipment: { weapon: null, head: null, chest: null, legs: null, boots: null, gloves: null, accessory1: null, accessory2: null }
     };
     setPlayer(newPlayer);
     setGameState('playing');
   }
 
-  const handleRestart = () => {
-    if (!player) return;
-    setDeathInfo(null);
-    setLogs(['A morte não é o fim... O ciclo recomeça.']);
-    setPlayer({
-        ...player, hp: player.max_hp, stamina: player.max_stamina, day: 1, xp: 0, gold: 0, inventory: [], charged: false, defending: false
-    });
-    setCombat(null);
-  };
-
-  const handleGiveUp = () => {
-    setDeathInfo(null); setCombat(null); setPlayer(null); setGameState('selecting');
-  };
-
-  // --- ACTIONS ---
-  async function explore() {
-    if (!player) return;
-    if (combat?.enemy) { addLog("⚠️ Você já está em combate!"); return; }
-    
-    const enemies: Enemy[] = [
-      { id: 'rato', name: 'Rato Voraz', hp: 6, str: 1, agi: 1, dmg_die: 4, isBoss: false },
-      { id: 'lobo', name: 'Lobo Magro', hp: 10, str: 2, agi: 2, dmg_die: 6, isBoss: false },
-      { id: 'bandido', name: 'Bandido', hp: 12, str: 2, agi: 1, dmg_die: 6, isBoss: false },
-      // Boss (10% chance)
-      { id: 'ogro', name: 'Ogro da Caverna', hp: 25, str: 4, agi: 1, dmg_die: 8, isBoss: true }
-    ]
-    
-    let enemy = { ...enemies[Math.floor(Math.random() * (enemies.length - 1))] };
-    if (Math.random() < 0.1) enemy = { ...enemies[3] };
-
-    setCombat({ enemy, stage: 'init' })
-    const label = enemy.isBoss ? `<strong class='text-yellow-500 uppercase'>BOSS: ${enemy.name}</strong>` : `<strong class='text-red-400'>${enemy.name}</strong>`;
-    addLog(`⚔️ Você encontrou: ${label}`)
-    setPlayer(p => p ? ({ ...p, encounters_today: p.encounters_today + 1 }) : null)
+  // --- AÇÕES DO JOGO ---
+  function equipItem(item: Item) {
+      if (!player) return;
+      const newInv = player.inventory.filter(i => i !== item);
+      let slotKey = '';
+      if(item.type === 'weapon') slotKey = 'weapon';
+      if(item.type === 'armor') slotKey = 'chest';
+      // @ts-ignore
+      const currentEquip = player.equipment[slotKey];
+      if (currentEquip) newInv.push(currentEquip);
+      const newEquip = { ...player.equipment, [slotKey]: item };
+      setPlayer({ ...player, inventory: newInv, equipment: newEquip });
+      addLog(`🛡️ Equipou: ${item.name}`);
   }
 
-  async function rest() {
-    if (!player || combat?.enemy) { addLog("🚫 Perigo próximo!"); return; }
-    const heal = Math.min(player.max_hp - player.hp, 5 + Math.floor(player.vit / 2));
-    const stam = Math.min(player.max_stamina - player.stamina, 5);
-    if (heal === 0 && stam === 0) { addLog("💤 Já descansado."); return; }
-    setPlayer(p => p ? ({ ...p, hp: p.hp + heal, stamina: p.stamina + stam }) : null)
-    addLog(`💤 Descansou. <span class='text-green-400'>+${heal} HP</span>, <span class='text-green-400'>+${stam} STA</span>.`);
+  function unequipItem(slotKey: string) {
+      if (!player) return;
+      // @ts-ignore
+      const item = player.equipment[slotKey];
+      if (!item) return;
+      const newEquip = { ...player.equipment, [slotKey]: null };
+      setPlayer({ ...player, equipment: newEquip, inventory: [...player.inventory, item] });
   }
 
-  async function openVillage() { 
-      if(!player) return;
-      addLog(`🏠 Vila em construção... (Ouro: ${player.gold})`) 
-  }
-
-  // === SISTEMA DE COMBATE ===
   function handleAttackClick() {
-      if (!player || !combat || !combat.enemy) return;
-      setPendingRoll({ type: 'attack', reason: 'Atacar' });
+      if (turnState !== 'player_input' || !combat) return;
+      setRollingDice({ reason: 'Ataque', type: 'attack' });
   }
 
-  function handleFleeClick() {
-      if (!player || !combat || !combat.enemy) return;
-      if (combat.enemy.isBoss) {
-          setBossTaunt("Você tentou fugir como o belo covarde que é, mas contra um chefe... Você só escolheu sofrer mais ao clicar nesse botão!");
-          setTimeout(() => {
-              setBossTaunt(null);
-              addLog("<span class='text-yellow-600'>Sua covardia custou caro. O Chefe aproveita sua hesitação!</span>");
-              enemyTurn();
-          }, 6000);
-          return;
-      }
-      setPendingRoll({ type: 'flee', reason: 'Fuga' });
-  }
-
-  function handleDiceRoll(result: number) {
-      const actionType = pendingRoll?.type;
-      setPendingRoll(null);
-      if (actionType === 'attack') resolveAttack(result);
-      else if (actionType === 'flee') resolveFlee(result);
+  function handleDiceComplete(result: number) {
+      const type = rollingDice?.type;
+      setRollingDice(null);
+      if (type === 'attack') resolveAttack(result);
+      if (type === 'flee') addLog("Fuga não implementada na demo.");
   }
 
   function resolveAttack(roll: number) {
       if (!player || !combat || !combat.enemy) return;
-      const isCharged = player.charged;
-      let damageMult = isCharged ? 1.5 : 1;
-      const rollMult = getD20Mult(roll);
-      const base = Math.floor(Math.random() * 4) + 1 + player.str;
-      const damage = Math.max(0, Math.floor((base * rollMult) * damageMult));
-      combat.enemy.hp -= damage;
-      
-      let logMsg = `<span class='text-blue-300'>${player.name}</span> atacou (d20: <strong>${roll}</strong>). Dano: <strong class='text-white'>${damage}</strong>.`;
-      if (isCharged) logMsg += " <span class='text-amber-500 font-bold'>(CARREGADO!)</span>";
-      addLog(logMsg);
+      setTurnState('resolving');
+      isProcessingTurn.current = true;
 
-      if (isCharged) setPlayer(p => p ? ({...p, charged: false}) : null);
-      setCombat({ ...combat });
+      let totalStr = player.str;
+      if (player.equipment.weapon?.stats?.atk) totalStr += player.equipment.weapon.stats.atk;
+      
+      let damage = 0;
+      if (roll > 4) {
+          const baseDmg = Math.floor(Math.random() * 4) + 1 + totalStr;
+          let mult = getD20Mult(roll);
+          if (player.charged) mult += 0.5;
+          damage = Math.floor(baseDmg * mult);
+      }
+
+      if (damage > 0 && player.equipment.weapon?.stats?.effect === 'bleed') {
+          if (!combat.enemy.statusEffects) combat.enemy.statusEffects = [];
+          if (!combat.enemy.statusEffects.includes('bleed')) {
+              combat.enemy.statusEffects.push('bleed');
+              addLog(`<span class='text-red-600 font-bold'>🩸 Inimigo sangrando!</span>`);
+          }
+      }
+
+      combat.enemy.hp -= damage;
+      addLog(`<span class='text-blue-300'>${player.name}</span> causou <strong>${damage}</strong> dano. (d20: ${roll})`);
+      
+      if (player.charged) setPlayer(p => p ? ({...p, charged: false}) : null);
 
       if (combat.enemy.hp <= 0) {
-        addLog(`💀 <strong class='text-red-500'>${combat.enemy.name}</strong> derrotado! <span class='text-purple-400'>+20 XP</span>`);
-        setPlayer(p => p ? ({...p, xp: p.xp + 20}) : null);
-        generateLoot(combat.enemy);
-        setCombat(null);
-        return;
+          winCombat();
+          setTurnState('player_input');
+          isProcessingTurn.current = false;
+      } else {
+          setTurnState('enemy_turn');
       }
-      setTimeout(() => enemyTurn(), 600);
   }
 
-  function resolveFlee(roll: number) {
-      if (roll > 10) {
-          addLog(`<span class="text-green-400">💨 Sucesso! (d20: ${roll}) Você fugiu para viver mais um dia.</span>`);
-          setCombat(null);
-      } else {
-          addLog(`<span class="text-red-400">🚫 Falha na fuga! (d20: ${roll}) Você tropeçou e ficou vulnerável.</span>`);
-          setTimeout(() => enemyTurn(), 600);
-      }
+  function enemyTurnLogic() {
+    if (!combat || !combat.enemy || !player) return;
+    const e = combat.enemy;
+    
+    if (e.statusEffects?.includes('bleed')) {
+        e.hp -= 1;
+        addLog(`🩸 ${e.name} perde 1 HP (Sangramento).`);
+        if (e.hp <= 0) { winCombat(); setTurnState('player_input'); isProcessingTurn.current = false; return; }
+    }
+
+    const rawDmg = Math.max(0, Math.floor(Math.random() * e.dmg_die) + e.str);
+    let defense = 0;
+    if (player.equipment.chest?.stats?.def) defense += player.equipment.chest.stats.def;
+    if (player.defending) defense += 2;
+
+    const finalDmg = Math.max(0, rawDmg - defense);
+
+    setPlayer(p => {
+        if (!p) return null;
+        const newHp = p.hp - finalDmg;
+        addLog(`👾 ${e.name} atacou. Dano: <strong class='text-red-400'>${finalDmg}</strong> (Def: ${defense})`);
+        if (newHp <= 0) {
+            setDeathInfo({ enemyName: e.name });
+            setTurnState('player_input');
+            isProcessingTurn.current = false;
+        }
+        return { ...p, hp: newHp, defending: false };
+    });
+
+    if (player.hp - finalDmg > 0) {
+        setTurnState('player_input');
+        isProcessingTurn.current = false;
+    }
   }
+
+  function winCombat() {
+      if(!player) return;
+      const xp = 20 + (combat?.enemy?.isBoss ? 50 : 0);
+      let dropItem: Item | null = null;
+      if (Math.random() > 0.5) dropItem = ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
+
+      setPlayer(p => {
+          if (!p) return null;
+          const newInv = dropItem ? [...p.inventory, dropItem] : p.inventory;
+          const newXp = p.xp + xp;
+          let newLevel = p.level;
+          let pts = p.skillPoints;
+          let statsPts = p.statPoints;
+          
+          // UPA DE NIVEL
+          if (newXp >= (newLevel + 1) * 100) {
+              newLevel++;
+              pts += 1; // Skill
+              statsPts += 3; // Status
+              addLog(`<span class='text-yellow-400 font-bold'>LEVEL UP! Nível ${newLevel}</span>`);
+          }
+          return { ...p, xp: newXp, level: newLevel, skillPoints: pts, statPoints: statsPts, inventory: newInv, gold: p.gold + 10, encounters_today: p.encounters_today + 1 };
+      });
+
+      addLog(`Vitória! +${xp} XP, +10 Ouro.`);
+      if(dropItem) addLog(`💰 Loot: <strong class='text-purple-300'>${dropItem.name}</strong>`);
+      setCombat(null);
+  }
+
+  async function explore() {
+    if (combat?.enemy) { addLog("⚠️ Já em combate!"); return; }
+    const totalEncounters = (player?.encounters_today || 0) + ((player?.day || 1) - 1) * 3;
+    const isBossTime = totalEncounters > 0 && totalEncounters % 15 === 0;
+    const enemies: Enemy[] = [ { id: 'rato', name: 'Rato Voraz', hp: 6, str: 1, agi: 1, dmg_die: 4, isBoss: false }, { id: 'lobo', name: 'Lobo Magro', hp: 10, str: 2, agi: 2, dmg_die: 6, isBoss: false }];
+    const boss: Enemy = { id: 'ogro', name: 'Ogro da Caverna', hp: 30, str: 4, agi: 1, dmg_die: 8, isBoss: true };
+    let enemy = isBossTime ? boss : enemies[Math.floor(Math.random() * enemies.length)];
+    setCombat({ enemy, stage: 'init' });
+    addLog(`⚔️ Você encontrou: ${enemy.name}`);
+    setTurnState('player_input');
+  }
+
+  async function rest() {
+      if (combat) return;
+      if (!player) return;
+      setPlayer({ ...player, hp: player.max_hp, mana: player.max_mana, stamina: player.max_stamina });
+      addLog("💤 Descanso completo.");
+  }
+
+  function openVillage() { addLog("🏠 A Vila está fechada hoje."); }
 
   function playerCharge() {
-    if (!player || !combat || !combat.enemy) return;
-    if (player.stamina < 2) { addLog('😓 Sem stamina (Custo: 2).'); return; }
-    setPlayer(p => p ? ({ ...p, stamina: p.stamina - 2, charged: true, defending: true }) : null);
-    addLog(`🔥 ${player.name} assume postura firme! (Defesa Alta + Próx. Ataque Forte)`);
-    setTimeout(() => enemyTurn(), 800);
-  }
-
-  function enemyTurn() {
-    if (!combat || !combat.enemy) return;
-    const e = combat.enemy;
-    const roll = Math.floor(Math.random() * 20) + 1;
-    const mult = getD20Mult(roll);
-    const base = Math.floor(Math.random() * e.dmg_die) + 1 + e.str;
-    let damage = Math.max(0, Math.floor(base * mult));
-    
-    setPlayer(p => {
-      if (!p) return null;
-      let receivedDmg = damage;
-      let defendedMsg = "";
-      if (p.defending) {
-          receivedDmg = Math.floor(damage / 2);
-          defendedMsg = " (Bloqueado!)";
-      }
-      addLog(`👾 <strong>${e.name}</strong> atacou. Dano: <strong class='text-red-500'>${receivedDmg}</strong>${defendedMsg}.`);
-      if (p.hp - receivedDmg <= 0) {
-        addLog('💀 <strong>VOCÊ MORREU...</strong>');
-        setDeathInfo({ enemyName: e.name });
-      }
-      return { ...p, hp: p.hp - receivedDmg, defending: false };
-    });
+      if (isProcessingTurn.current || !player || !combat) return;
+      if (player.stamina < 2) { addLog("Sem stamina."); return; }
+      isProcessingTurn.current = true;
+      setPlayer(p => p ? ({...p, charged: true, defending: true, stamina: p.stamina - 2}) : null);
+      addLog("🔥 Carregando ataque...");
+      setTurnState('enemy_turn');
   }
 
   return (
-    <div className="min-h-screen bg-rpg-bg flex flex-col items-center py-8 px-4 font-sans selection:bg-rpg-accent selection:text-black">
+    <div className="h-screen w-full bg-rpg-bg flex flex-col overflow-hidden font-sans text-gray-200">
+      {rollingDice && <Dice3D onRollComplete={handleDiceComplete} />}
       
-      {/* POP-UPS E MODAIS */}
-      {deathInfo && <DeathModal enemyName={deathInfo.enemyName} onRestart={handleRestart} onGiveUp={handleGiveUp} />}
-      {showInventory && player && <InventoryModal player={player} onClose={() => setShowInventory(false)} />}
-      {pendingRoll && <DiceRoller reason={pendingRoll.reason} onRoll={handleDiceRoll} />}
+      {/* MODAIS */}
+      {showInventory && player && <CharacterModal player={player} onClose={() => setShowInventory(false)} onEquip={equipItem} onUnequip={unequipItem} onDistributePoint={(s) => {
+          if(player.statPoints > 0) setPlayer({...player, [s]: (player[s as keyof Player] as number) + 1, statPoints: player.statPoints - 1})
+      }} />}
       
-      {/* MENSAGEM DO BOSS */}
-      {bossTaunt && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 px-4">
-              <div className="bg-red-950 border-4 border-red-600 p-8 rounded-xl max-w-2xl text-center shadow-[0_0_100px_rgba(220,38,38,0.6)] animate-bounce">
-                  <h2 className="text-3xl font-medieval text-red-500 mb-4">A VOZ DO CHEFE ECOA...</h2>
-                  <p className="text-xl text-white font-mono leading-relaxed">"{bossTaunt}"</p>
-              </div>
-          </div>
-      )}
+      {showSkills && player && <SkillTreeModal player={player} onClose={() => setShowSkills(false)} onLearnSkill={() => addLog("Habilidade aprendida!")} />}
+      {showMap && player && <MapModal player={player} onClose={() => setShowMap(false)} />}
+      
+      {deathInfo && <DeathModal enemyName={deathInfo.enemyName} onRestart={() => {setDeathInfo(null); setCombat(null);}} onGiveUp={() => setGameState('login')} />}
 
-      {/* TELAS */}
-      {gameState === 'login' && <LoginScreen onLogin={handleLoginSubmit} />}
-      
-      {gameState === 'selecting' && (
-        <GameModeSelect username={tempUsername} hasSave={false} onSelectMode={handleModeSelect} />
-      )}
+      {/* LOGIN */}
+      {gameState === 'login' && <LoginScreen onLoginSuccess={handleLoginSuccess} />}
+      {/* SELECT */}
+      {gameState === 'selecting' && <GameModeSelect username={tempUsername} hasSave={userHasSave} onSelectMode={handleModeSelect} />}
 
+      {/* GAME */}
       {gameState === 'playing' && player && (
         <>
-            <header className="mb-8 text-center animate-fade-in relative">
-                <h1 className="text-4xl md:text-5xl font-medieval text-rpg-gold drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] tracking-wider">
-                Ciclo Sísifo
-                </h1>
-                <p className="text-rpg-accent font-medieval text-lg mt-1 opacity-80">— Da Lama ao Trono —</p>
-                
-                {/* REMOVEMOS O BOTÃO DE MOCHILA DAQUI */}
+            <header className="h-16 bg-[#111] border-b border-rpg-border flex items-center justify-between px-6 shrink-0 z-20">
+                <div className="flex items-center gap-4">
+                    <h1 className="text-2xl font-medieval text-rpg-gold">Ciclo Sísifo</h1>
+                    <button onClick={() => setShowMap(true)} className="flex items-center gap-2 bg-[#2a221b] border border-[#8b7355] px-3 py-1 rounded hover:bg-[#3d3228] transition-colors font-medieval text-sm">🗺️ Mapa</button>
+                </div>
+                <button onClick={() => setShowSkills(true)} className="flex items-center gap-2 bg-purple-900/30 border border-purple-500/50 px-4 py-1 rounded hover:bg-purple-900/50 transition-all font-medieval text-purple-200">
+                    🔮 Habilidades {player.skillPoints > 0 && <span className="w-2 h-2 bg-purple-400 rounded-full animate-pulse ml-2"></span>}
+                </button>
             </header>
-            
-            <main className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-[300px_1fr_300px] gap-6 items-start h-auto lg:h-[600px]">
-                <section className="h-full">
-                    {/* Passamos a função de abrir o inventário para o HUD */}
-                    <HUD 
-                        player={player} 
-                        onExplore={explore} 
-                        onRest={rest} 
-                        onVillage={openVillage}
-                        onOpenInventory={() => setShowInventory(true)}
-                    />
+
+            <main className="flex-1 grid grid-cols-1 lg:grid-cols-[320px_1fr_320px] gap-0 overflow-hidden">
+                <section className="bg-[#0a0a0a] border-r border-rpg-border p-4 overflow-y-auto custom-scrollbar">
+                    <HUD player={player} onExplore={explore} onRest={rest} onVillage={() => addLog("Vila W.I.P")} onOpenInventory={() => setShowInventory(true)} />
                 </section>
-                <section className="h-full">
-                    <LogBox logs={logs} />
+
+                <section className="bg-black/80 relative flex flex-col h-full border-r border-rpg-border">
+                    <div className="flex-1 relative overflow-hidden">
+                         <div className="absolute inset-0 p-4 pb-4 overflow-y-auto custom-scrollbar">
+                            <LogBox logs={logs} />
+                         </div>
+                    </div>
+                    <div className="bg-[#111] border-t border-rpg-border p-4 flex flex-col md:flex-row items-center gap-4 shrink-0 z-10 shadow-[0_-5px_15px_rgba(0,0,0,0.5)]">
+                        <div className="bg-white p-2 rounded shrink-0"><PixQRCode /></div>
+                        <div className="text-center md:text-left">
+                            <p className="text-rpg-gold font-medieval text-sm mb-1">Apoie o Desenvolvedor</p>
+                            <p className="text-[10px] text-gray-500 leading-tight italic max-w-md">
+                                "Se esta plataforma está te trazendo um pouco de alegria, saiba que ela é feita por uma só pessoa, que não passa de um simples plebeu que dorme em seleiros em troca de trabalhos manuais, mas faz tudo com zelo e principalmente de forma gratuita. Considerando isso, se possível, deixe uma moeda de ouro, prata ou bronze (ou seja, um PIX) para que o plebeu programador possa continuar codando, melhorando, fazendo novos mundos e pagando a taverna (servidor). Continue sua nobre aventura, e cuidado! Pois eu costumava ser aventureiro igual a você, até que levei uma flechada no joelho, e hoje sou CLT. Que os dados sempre rolem 20 para você!"
+                            </p>
+                        </div>
+                    </div>
                 </section>
-                <section className="h-full">
+
+                <section className="bg-[#0a0a0a] p-4 overflow-y-auto custom-scrollbar">
                     <CombatPanel 
                         enemy={combat?.enemy || null} 
-                        onAttack={handleAttackClick}
+                        onAttack={handleAttackClick} 
                         onCharge={playerCharge} 
-                        onFlee={handleFleeClick}
+                        onFlee={() => {
+                            if(combat?.enemy?.isBoss) {
+                                setBossTaunt("Covarde! Você não pode fugir de um Chefe!");
+                                setTimeout(() => setBossTaunt(null), 3000);
+                                isProcessingTurn.current = true;
+                                setTimeout(enemyTurnLogic, 1000);
+                            } else {
+                                setRollingDice({ reason: 'Fuga', type: 'flee' });
+                            }
+                        }} 
                     />
                 </section>
             </main>
-
-            <footer className="mt-16 mb-8 w-full max-w-4xl bg-rpg-panel border border-rpg-border p-6 rounded-lg shadow-lg flex flex-col md:flex-row gap-6 items-center animate-fade-in mx-auto">
-                <div className="flex-shrink-0 bg-white p-2 rounded shadow-inner">
-                    <PixQRCode />
-                </div>
-                <div className="text-center md:text-left">
-                    <h4 className="text-rpg-gold font-medieval text-xl mb-2">Ó nobre viajante!</h4>
-                    <p className="text-gray-400 text-xs md:text-sm font-mono leading-relaxed italic">
-                        "Se esta plataforma está te trazendo um pouco de alegria, saiba que ela é feita por uma só pessoa, 
-                        que não passa de um simples plebeu..."
-                    </p>
-                </div>
-            </footer>
         </>
       )}
-
-      <div className="text-gray-700 text-[10px] text-center font-mono mt-4 pb-4">
-        v0.1.2 • React Frontend • Flask Backend • Criado por MrCap
-      </div>
     </div>
   )
 }
